@@ -1,0 +1,36 @@
+MIT License
+
+Copyright (c) 2026 Alim4385
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+---
+
+ADDITIONAL DISCLAIMER (Termux MCP specific):
+
+This software grants shell (bash) execution access on the device it runs on
+to any client that connects to it. The author(s) take NO responsibility for:
+- data loss, device damage, or unauthorized access resulting from use of this software,
+- actions taken by any AI or client connected through this server,
+- consequences of exposing this server to public networks or tunnels,
+- misuse of elevated (root) or Termux:API capabilities if enabled by the user.
+
+By using this software, you accept full responsibility for how it is configured,
+who is given access to it, and what actions are performed through it. Use at
+your own risk.

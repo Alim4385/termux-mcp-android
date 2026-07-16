@@ -1,0 +1,5 @@
+node_modules/
+.mcp_state.json
+claude_workspace/
+*.log
+.DS_Store

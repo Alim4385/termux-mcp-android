@@ -45,13 +45,15 @@ const cut = (t) => {
 // Real cwd izləmək üçün marker — bash özü PWD-ni yazır, biz JS-də əmri parse etmirik
 const MARK = '\u0001CWD\u0001';
 
-// Bash əmrini icra et (timeout + kəsilmiş stdout/stderr + real cwd izləməsi)
-const run = (cmd) => new Promise((resolve) => {
+// Bash əmrini icra et (timeout + kəsilmiş stdout/stderr + real cwd izləməsi + stdin dəstəyi)
+const run = (cmd, stdin) => new Promise((resolve) => {
   let o = '', e = '', done = false;
   const finish = (v) => { if (!done) { done = true; clearTimeout(timer); resolve(v); } };
 
   const full = `${cmd}\nprintf '${MARK}%s' "$PWD"`;
   const p = spawn('bash', ['-c', full], { cwd, env: { ...process.env, HOME, TERM: 'xterm-256color' } });
+  if (stdin) p.stdin.write(stdin);
+  p.stdin.end(); // VACİB: bağlanmasa, stdin gözləyən əmr heç vaxt EOF almaz, timeout-a qədər asılı qalar
   p.stdout.on('data', (d) => { if (o.length < MAX * 2) o += d; });
   p.stderr.on('data', (d) => { if (e.length < MAX * 2) e += d; });
   p.on('close', async (c) => {
@@ -90,7 +92,10 @@ const handle = async ({ method, params, id }) => {
       {
         name: 'bash',
         description: `Termux-da istənilən bash əmri icra et (cd, zəncirlənmiş əmrlər ("&&", ";") daxil olmaqla, cwd avtomatik izlənir). Paket qurmaq, script işlətmək, sistem məlumatı almaq üçün istifadə et. Sadə fayl yazma/oxuma/düzəliş üçün bunun əvəzinə view/create_file/str_replace alətlərini üstün tut — onlar daha etibarlıdır. ${GUARD}`,
-        inputSchema: { type: 'object', properties: { cmd: { type: 'string', description: 'Bash əmri' } }, required: ['cmd'] },
+        inputSchema: { type: 'object', properties: {
+          cmd: { type: 'string', description: 'Bash əmri' },
+          stdin: { type: 'string', description: 'Əmrə göndəriləcək stdin mətni (interaktiv sual üçün, məs. "Y\\n"). Boş buraxıla bilər.' },
+        }, required: ['cmd'] },
       },
       {
         name: 'view',
@@ -117,6 +122,16 @@ const handle = async ({ method, params, id }) => {
           new_str: { type: 'string', description: 'Yeni mətn (boş buraxılsa old_str silinir)' },
         }, required: ['path', 'old_str'] },
       },
+      {
+        name: 'process',
+        description: `Uzun müddət işləyən arxa fon prosesini idarə et (məs. bir dev server). "start" əmri arxa fonda başladır, PID və log fayl yolu qaytarır — cmd-in özündə "&" YAZMA, alət onsuz da arxa fona keçirir; sonra log faylını view/bash ilə oxuyub prosesin vəziyyətini yoxla. "kill" PID vasitəsilə prosesi (və onun bütün alt-proseslərini) dayandırır. Aktiv prosesləri sadalamaq üçün bunun əvəzinə bash ilə "ps aux" işlət. ${GUARD}`,
+        inputSchema: { type: 'object', properties: {
+          action: { type: 'string', enum: ['start', 'kill'], description: 'Əməliyyat' },
+          cmd: { type: 'string', description: 'start üçün bash əmri (arxa fonda işə salınacaq, "&" əlavə etmə)' },
+          pid: { type: 'number', description: 'kill üçün proses ID-si (start-ın qaytardığı pid)' },
+          signal: { type: 'string', enum: ['SIGTERM', 'SIGKILL'], description: 'kill üçün siqnal, default SIGTERM (mülayim dayandırma)' },
+        }, required: ['action'] },
+      },
     ] } };
   }
 
@@ -124,7 +139,7 @@ const handle = async ({ method, params, id }) => {
     const cmd = params.arguments?.cmd;
     if (!cmd) return { jsonrpc: '2.0', id, ...text('❌ cmd boşdur', true) };
 
-    const { c, o, e, newCwd } = await run(cmd);
+    const { c, o, e, newCwd } = await run(cmd, params.arguments?.stdin);
     if (newCwd && newCwd !== cwd) {
       try { await fs.promises.access(newCwd); cwd = newCwd; saveCwd(); } catch {}
     }
@@ -210,6 +225,47 @@ const handle = async ({ method, params, id }) => {
     } catch (err) {
       return { jsonrpc: '2.0', id, ...text(`❌ ${err.code === 'ENOENT' ? 'Tapılmadı: ' + full : err.message}`, true) };
     }
+  }
+
+  if (method === 'tools/call' && params?.name === 'process') {
+    const action = params.arguments?.action;
+
+    if (action === 'start') {
+      const cmd = params.arguments?.cmd;
+      if (!cmd) return { jsonrpc: '2.0', id, ...text('❌ start üçün cmd tələb olunur', true) };
+      const logPath = path.join(WS, `.proc-${Date.now()}-${Math.floor(Math.random() * 1000)}.log`);
+      try {
+        const p = spawn('bash', ['-c', `${cmd} > '${logPath}' 2>&1`], { cwd, detached: true, stdio: 'ignore' });
+        p.unref();
+        return { jsonrpc: '2.0', id, ...text(JSON.stringify({ pid: p.pid, cmd, log: logPath, status: 'started' })) };
+      } catch (err) {
+        return { jsonrpc: '2.0', id, ...text(`❌ ${err.message}`, true) };
+      }
+    }
+
+    if (action === 'kill') {
+      const pid = params.arguments?.pid;
+      const signal = params.arguments?.signal === 'SIGKILL' ? 'SIGKILL' : 'SIGTERM';
+      if (!Number.isInteger(pid) || pid <= 1) {
+        return { jsonrpc: '2.0', id, ...text('❌ pid düzgün deyil (1-dən böyük tam ədəd olmalıdır)', true) };
+      }
+      if (pid === process.pid) {
+        return { jsonrpc: '2.0', id, ...text('❌ Bu, serverin öz prosesidir — öldürülə bilməz', true) };
+      }
+      try {
+        process.kill(-pid, signal); // bütün proses qrupunu öldür (alt-proseslər daxil)
+        return { jsonrpc: '2.0', id, ...text(JSON.stringify({ pid, signal, status: 'killed' })) };
+      } catch {
+        try {
+          process.kill(pid, signal); // qrup kill uğursuzdursa, tək prosesi sına
+          return { jsonrpc: '2.0', id, ...text(JSON.stringify({ pid, signal, status: 'killed (tək proses)' })) };
+        } catch (err2) {
+          return { jsonrpc: '2.0', id, ...text(`❌ ${err2.message}`, true) };
+        }
+      }
+    }
+
+    return { jsonrpc: '2.0', id, ...text('❌ Naməlum action (start, kill olmalıdır)', true) };
   }
 
   return { jsonrpc: '2.0', id: id ?? null, error: { code: -32601, message: 'Method not found' } };
